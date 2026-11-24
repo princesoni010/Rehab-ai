@@ -281,6 +281,51 @@ async def get_patient_assignments(
     return {"assignments": assignments}
 
 
+@router.post("/assignments", response_model=AssignmentResponse)
+async def create_assignment(
+    payload: AssignmentCreateRequest,
+    doctor: dict = Depends(require_role({"doctor"})),
+    db: AsyncIOMotorDatabase = Depends(get_db),
+) -> AssignmentResponse:
+    pid = to_object_id(payload.patient_id, "patient_id")
+
+    # Verify patient is linked to this doctor
+    await _assert_linked(db, doctor["id"], pid)
+
+    now = utc_now()
+    doc = {
+        "doctor_id": ObjectId(doctor["id"]),
+        "patient_id": pid,
+        "exercise_name": payload.exercise_name,
+        "target_reps": payload.target_reps,
+        "target_sets": payload.target_sets,
+        "rest_interval_seconds": payload.rest_interval_seconds,
+        "protocol": payload.protocol,
+        "due_date": payload.due_date,
+        "notes": payload.notes,
+        "status": "assigned",
+        "created_at": now,
+        "updated_at": now,
+    }
+    result = await db.exercise_assignments.insert_one(doc)
+    created = await db.exercise_assignments.find_one({"_id": result.inserted_id})
+    s = serialize_doc(created)
+    return AssignmentResponse(
+        id=s["id"],
+        patient_id=s["patient_id"],
+        doctor_id=s["doctor_id"],
+        exercise_name=s["exercise_name"],
+        target_reps=s["target_reps"],
+        target_sets=s.get("target_sets", 1),
+        rest_interval_seconds=s.get("rest_interval_seconds", 60),
+        protocol=s.get("protocol"),
+        due_date=s.get("due_date"),
+        status=s.get("status", "assigned"),
+        notes=s.get("notes"),
+        created_at=s["created_at"],
+    )
+
+
 @router.put("/assignments/{assignment_id}")
 async def update_assignment(
     assignment_id: str,

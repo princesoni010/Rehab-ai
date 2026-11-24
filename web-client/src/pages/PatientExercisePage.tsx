@@ -15,7 +15,11 @@ import {
   buildSetSpeech,
 } from "../lib/bhashiniTTS";
 
-const WS_BASE = import.meta.env.VITE_WS_BASE_URL ?? "ws://localhost:8000/api/v1";
+const WS_BASE = import.meta.env.VITE_WS_BASE_URL ?? (
+  typeof window !== "undefined"
+    ? `${window.location.protocol === "https:" ? "wss:" : "ws:"}//${window.location.host}/api/v1`
+    : "ws://127.0.0.1:8000/api/v1"
+);
 
 const POSE_CONNECTIONS: Array<[number, number]> = [
   [11, 12], [11, 13], [13, 15], [12, 14], [14, 16],
