@@ -1,88 +1,115 @@
-# Rehab AI — Movement Intelligence Platform
+# Physico Health (Rehab-AI) — Movement Intelligence & Tele-Rehabilitation Platform
 
-Rehab AI is a comprehensive tele-rehabilitation platform designed to bridge the gap between clinical physical therapy and at-home exercise routines. By leveraging **MediaPipe Pose** for real-time motion tracking and a robust **FastAPI** backend, the platform provides patients with immediate feedback on their form while allowing doctors to manage treatments and monitor progress remotely.
+[![Status](https://img.shields.io/badge/Status-Active%20Production%20Ready-brightgreen.svg)]()
+[![Privacy](https://img.shields.io/badge/Privacy-100%25%20On--Device%20Edge%20Vision-blue.svg)]()
+[![Voice AI](https://img.shields.io/badge/Voice%20AI-ElevenLabs%20Multilingual-purple.svg)]()
+[![Deep Learning](https://img.shields.io/badge/AI%20Ensemble-PyTorch%20LSTM%20%2B%20Transformer-orange.svg)]()
 
-## 🏗 Project Architecture
-
-The system is composed of two primary modules:
-
-*   **`python-server`**: A high-performance FastAPI backend that handles user authentication, exercise management, data persistence with MongoDB, and real-time motion analysis via WebSockets.
-*   **`web-client`**: A modern React + TypeScript frontend built with Vite, providing interactive dashboards for both doctors and patients, and a live exercise console with camera-based tracking.
-
-## 🚀 Key Features
-
-### 👨‍⚕️ For Doctors
-*   **Patient Management**: Link patients to your profile to manage their care.
-*   **Exercise Prescriptions**: Assign specific exercises from the catalog to individual patients.
-*   **Progress Analytics**: View detailed reports on patient adherence, form accuracy, and session history over time.
-
-### 🧘 For Patients
-*   **Real-time Feedback**: Use your device's camera for live pose tracking during exercises.
-*   **Smart Counters**: Automatically count repetitions based on joint angle analysis.
-*   **Progress Tracking**: Monitor your own journey through trend summaries and historical session data.
+> **Physico Health** is an intelligent tele-rehabilitation platform that transforms any standard webcam into a real-time personal physiotherapy coach. Designed for post-surgery, stroke, and orthopedic recovery, it delivers sub-50ms exercise form correction, automated repetition counting, and objective 0–100 clinical quality scoring without ever streaming raw patient video to the cloud.
 
 ---
 
-## 🛠 Getting Started
+## 🌟 Key Highlights & MVP Capabilities
 
-### Prerequisites
-*   [Docker](https://www.docker.com/products/docker-desktop/) (Recommended for full stack)
-*   [Python 3.12+](https://www.python.org/downloads/) (For local backend dev)
-*   [Node.js 20+](https://nodejs.org/) (For local frontend dev)
-
-### Fast Track (Full Stack with Docker)
-
-The easiest way to run the entire system is using Docker Compose:
-
-1.  Clone the repository:
-    ```bash
-    git clone https://github.com/parkky21/Rehab-AI-v2.git
-    cd Rehab-AI-v2
-    ```
-
-2.  Initialize environment variables:
-    ```bash
-    cp python-server/.env.example python-server/.env
-    cp web-client/.env.example web-client/.env
-    ```
-
-3.  Launch the services:
-    ```bash
-    # From the python-server directory (where the compose file lives)
-    cd python-server
-    docker compose up --build
-    ```
-
-*   **Web App**: `http://localhost:5173`
-*   **API Docs**: `http://localhost:8000/docs`
+- 🔒 **100% Privacy-by-Design (Edge Computer Vision):** Google MediaPipe runs in-browser via WebAssembly (WASM), computing 33 3D skeletal landmarks locally. Zero raw video frames ever leave the device.
+- 🗣️ **Ultra-Realistic AI Voice Coaching (ElevenLabs):** Spoken real-time auditory feedback in Hindi and English *(e.g., "Knees ko straight rakhein", "Slow down the descent")* with offline Web Speech API fallback.
+- 🧠 **Hybrid ML Scoring Ensemble:** Combines Deep Learning (PyTorch Bidirectional LSTM + Attention Transformer) with validated deterministic Biomechanical rules (Range of Motion, joint symmetry, hip sway) for explainable 0–100 rep scores.
+- ⏱️ **Asymmetric Rehab Tempo Tracking:** Enforces safe rehabilitation dynamics with a $2\times$ safety penalty on fast/jerky repetitions and only $0.5\times$ on slow, controlled eccentric movements.
+- 🖐️ **Touchless Gesture Control:** 1-second "Hands-Together" gesture to Start, Pause, or Complete exercises without physically touching the keyboard or mouse.
+- 🎬 **Dynamic In-Session Demo Video Player:** Floating, glassmorphic picture-in-picture exercise demonstration video automatically synchronized with assigned regimens.
+- 📊 **Doctor Portal & Vector PDF Progress Reports:** Real-time doctor triage dashboard with automated, downloadable clinical progress reports (Matplotlib + ReportLab) plotting ROM trajectories and compliance metrics.
 
 ---
 
-## 💻 Manual Development Setup
+## 🏗 System Architecture & Real-Time Pipeline
 
-### Backend (`python-server`)
-The backend uses `uv` for package management.
-
-1.  Navigate to the server directory: `cd python-server`
-2.  Install dependencies: `uv sync`
-3.  Seed demo data: `uv run python -m api_server.seed_demo`
-4.  Run the server: `uv run uvicorn api_server.main:app --reload`
-
-### Frontend (`web-client`)
-1.  Navigate to the client directory: `cd web-client`
-2.  Install dependencies: `npm install`
-3.  Run development server: `npm run dev`
+```
+  [ Webcam Capture (30 FPS) ]
+              │
+              ▼
+  [ Google MediaPipe (WASM Edge) ] ── (33 3D Landmarks Extracted)
+              │
+              ▼ (WebSocket /ws/session ~2 KB/frame)
+  [ FastAPI + EMA Landmark Smoother (α=0.5) ]
+              │
+              ▼ (Hip-Center & Torso Normalization)
+  [ Biomechanics Engine (ROM, Tempo & Sway Trackers) ]
+              │
+              ▼
+  [ Hybrid AI Ensemble (LSTM + Transformer + Clinical Rules) ]
+              │
+     ┌────────┴──────────────────────────┐
+     ▼                                   ▼
+[ ElevenLabs Voice AI ]       [ MongoDB & Matplotlib PDF ]
+(Live Spoken Correction)      (Doctor Portal & Clinical Report)
+```
 
 ---
 
-## 📡 API Overview (v1)
+## 🛠 Technology Stack
 
-*   `POST /auth/register` & `/auth/login`: Identity management.
-*   `GET /exercises`: The catalog of available movement patterns.
-*   `GET /doctor/patients`: Management views for practitioners.
-*   `WS /ws/session`: The primary real-time entry point for pose data and guidance.
+| Layer | Technologies |
+| :--- | :--- |
+| **Frontend & Vision** | React 18, TypeScript, Vite, Google MediaPipe (`@mediapipe/tasks-vision` WASM), HTML5 Canvas 30 FPS HUD, Tailwind CSS |
+| **Real-Time Streaming** | FastAPI (Python 3.12), Uvicorn ASGI, WebSockets (`/ws/session`) |
+| **AI / Machine Learning** | PyTorch (Bidirectional LSTM, Attention Transformer), NumPy, SciKit-Learn, EMA Landmark Smoothing |
+| **Voice AI & LLMs** | ElevenLabs AI (`eleven_multilingual_v2`), Web Speech API, Google Gemini 2.5 Flash / OpenAI |
+| **Database & Security** | MongoDB 7.0, Motor (Async Driver), JWT Authentication, Role-Based Access Control (RBAC) |
+| **Reporting & DevOps** | Matplotlib (Agg Engine), ReportLab Vector PDF, Docker, Git/GitHub |
 
 ---
 
-## 📜 License
-This project is private and intended for internal use and demonstration purposes.
+## 🚀 Quick Start Guide
+
+### 1. Prerequisites
+- [Node.js 20+](https://nodejs.org/)
+- [Python 3.12+](https://www.python.org/)
+- [MongoDB 7.0](https://www.mongodb.com/try/download/community)
+
+### 2. Backend Setup (`python-server`)
+```bash
+cd python-server
+
+# Virtual environment setup
+python -m venv .venv
+# Windows:
+.\.venv\Scripts\activate
+# Linux/Mac:
+source .venv/bin/activate
+
+# Install dependencies
+pip install -r requirements.txt
+
+# Run server with live reload
+uvicorn api_server.main:app --host 0.0.0.0 --port 8000 --reload
+```
+
+* API Documentation: `http://localhost:8000/docs`
+
+### 3. Frontend Setup (`web-client`)
+```bash
+cd web-client
+
+# Install dependencies
+npm install
+
+# Run Vite dev server
+npm run dev -- --host 0.0.0.0 --port 5173
+```
+
+* Web Application: `http://localhost:5173`
+
+---
+
+## 📡 Core API Endpoints
+
+* `POST /auth/register` & `POST /auth/login` — JWT Role-Based Authentication (Patient & Doctor).
+* `WS /ws/session` — Low-latency full-duplex WebSocket stream for landmark vectors, gesture triggers, and live coaching feedback.
+* `POST /api/tts/speak` — ElevenLabs AI voice synthesis proxy with intelligent server-side caching.
+* `GET /patient/progress/pdf` — Generates clinical-grade downloadable PDF progress reports.
+* `GET /exercises` — Catalog of guided rehabilitation movement routines.
+
+---
+
+## 📜 License & Compliance
+This project is developed for physical therapy tele-rehabilitation and research demonstrations, adhering to strict privacy-first patient data design.

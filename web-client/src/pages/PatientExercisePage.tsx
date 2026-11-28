@@ -8,6 +8,7 @@ import { useImmersive } from "../lib/ImmersiveContext";
 import type { Assignment, RepEvent } from "../lib/types";
 import { ScoreRing } from "../components/ScoreRing";
 import { RepCard, scoreClass } from "../components/RepCard";
+import { ExerciseDemoVideoPanel } from "../components/ExerciseDemoVideoPanel";
 import {
   ElevenLabsTTSService as BhashiniTTSService,
   SUPPORTED_LANGUAGES,
@@ -899,6 +900,13 @@ export function PatientExercisePage() {
         <video ref={videoRef} playsInline muted className="immersive-video" />
         <canvas ref={canvasRef} className="immersive-canvas" />
       </div>
+
+      {/* Floating Exercise Demo Video (right side) */}
+      <ExerciseDemoVideoPanel
+        exerciseName={selectedAssignment?.exercise_name ?? ""}
+        assignmentId={selectedAssignment?.id}
+        isPlaying={running}
+      />
 
       {/* Top Bar Controls */}
       <div className={`hud-top-bar ${showControls ? "" : "hud-hidden"}`}>
