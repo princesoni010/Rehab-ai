@@ -5,6 +5,7 @@ import { useAuth } from "../lib/auth";
 import { useImmersive } from "../lib/ImmersiveContext";
 import { getPatientAssignments } from "../lib/api";
 import { ThemeToggle } from "./ThemeToggle";
+import { NotificationBell } from "./NotificationBell";
 
 export function Shell() {
   const { user, logout, accessToken } = useAuth();
@@ -171,8 +172,9 @@ export function Shell() {
         </nav>
 
         <div className="sidebar-footer">
-          <div style={{ display: "flex", justifyContent: isCollapsed ? "center" : "flex-start", marginBottom: "0.75rem", padding: isCollapsed ? "0" : "0 0.4rem" }}>
+          <div style={{ display: "flex", justifyContent: isCollapsed ? "center" : "flex-start", alignItems: "center", marginBottom: "0.75rem", padding: isCollapsed ? "0" : "0 0.4rem", gap: "8px" }}>
             <ThemeToggle compact={isCollapsed} />
+            {!isCollapsed && <NotificationBell />}
           </div>
 
           <div className="sidebar-user">
@@ -196,7 +198,8 @@ export function Shell() {
               <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
             </button>
             <span className="brand-name" style={{ fontSize: "1rem" }}>Physico Health</span>
-            <div style={{ marginLeft: "auto" }}>
+            <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: "8px" }}>
+              <NotificationBell />
               <ThemeToggle compact={true} />
             </div>
           </div>

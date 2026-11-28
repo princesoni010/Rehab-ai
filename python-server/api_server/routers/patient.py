@@ -1,14 +1,18 @@
+import asyncio
+import os
+import re
+
 from bson import ObjectId
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException, Response
+from google import genai
 from motor.motor_asyncio import AsyncIOMotorDatabase
+import openai
 
 from api_server.database import get_db
 from api_server.deps import require_role
-from api_server.utils import serialize_doc, utc_now
+from api_server.pdf_report import build_progress_pdf, build_session_pdf
 from api_server.schemas import PainLogRequest
-import os
-import openai
-from google import genai
+from api_server.utils import serialize_doc, to_object_id, utc_now
 
 router = APIRouter(prefix="/patient", tags=["patient"])
 
@@ -62,6 +66,47 @@ async def my_assignments(
     ).sort("created_at", -1)
     assignments = [serialize_doc(doc) async for doc in cursor]
     return {"assignments": assignments}
+
+
+@router.get("/notifications")
+async def my_notifications(
+    patient: dict = Depends(require_role({"patient"})),
+    db: AsyncIOMotorDatabase = Depends(get_db),
+) -> dict:
+    """Return today's newly assigned tasks as notifications."""
+    from datetime import datetime, timezone, timedelta
+    today_start = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
+    # Assignments created today (or assigned status, last 7 days as fallback)
+    cursor = db.exercise_assignments.find(
+        {
+            "patient_id": ObjectId(patient["id"]),
+            "status": {"$in": ["assigned", "in_progress"]},
+            "created_at": {"$gte": today_start - timedelta(days=7)},
+        }
+    ).sort("created_at", -1).limit(20)
+    all_docs = [serialize_doc(doc) async for doc in cursor]
+
+    notifications = []
+    for doc in all_docs:
+        created_str = doc.get("created_at", "")
+        try:
+            created_dt = datetime.fromisoformat(created_str.replace("Z", "+00:00")) if isinstance(created_str, str) else created_str
+            is_today = created_dt.date() == datetime.now(timezone.utc).date()
+        except Exception:
+            is_today = False
+        notifications.append({
+            "id": doc["id"],
+            "exercise_name": doc.get("exercise_name"),
+            "target_reps": doc.get("target_reps"),
+            "target_sets": doc.get("target_sets"),
+            "rest_interval_seconds": doc.get("rest_interval_seconds", 60),
+            "status": doc.get("status"),
+            "notes": doc.get("notes"),
+            "created_at": created_str,
+            "is_today": is_today,
+        })
+    today_count = sum(1 for n in notifications if n["is_today"])
+    return {"notifications": notifications, "today_count": today_count}
 
 
 @router.get("/roadmap")
@@ -238,5 +283,113 @@ async def get_recovery_score(
             "avg_tempo": round(avg_tempo, 1)
         }
     }
+
+
+def _safe_filename_part(value: str) -> str:
+    cleaned = re.sub(r"[^a-zA-Z0-9_-]+", "-", value.strip().lower()).strip("-")
+    return cleaned or "session"
+
+
+@router.get("/sessions/{session_id}/report.pdf")
+async def download_session_report_pdf(
+    session_id: str,
+    patient: dict = Depends(require_role({"patient"})),
+    db: AsyncIOMotorDatabase = Depends(get_db),
+) -> Response:
+    sid = to_object_id(session_id, "session_id")
+    session_doc = await db.sessions.find_one(
+        {"_id": sid, "patient_id": ObjectId(patient["id"])}
+    )
+    if not session_doc:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    session = serialize_doc(session_doc)
+    summary = dict(session.get("summary") or {})
+
+    # Reconstruct rep summary from rep_events if session hasn't finalized summary yet
+    if not summary.get("reps"):
+        rep_docs = [
+            serialize_doc(r)
+            async for r in db.rep_events.find({"session_id": sid}).sort("rep_number", 1)
+        ]
+        if rep_docs:
+            n = len(rep_docs)
+            reps_list = []
+            for r in rep_docs:
+                sc = r.get("scores") or {}
+                reps_list.append({
+                    "rep": r.get("rep_number"),
+                    "rom_score": sc.get("rom_score", 0),
+                    "stability_score": sc.get("stability_score", 0),
+                    "tempo_score": sc.get("tempo_score", 0),
+                    "asymmetry_score": sc.get("asymmetry_score", 100),
+                    "final_score": sc.get("final_score", 0),
+                    "rom_value": r.get("rom_value", 0),
+                    "rep_time": r.get("rep_time", 0),
+                    "feedback": [],
+                })
+            summary.setdefault("total_reps", n)
+            summary.setdefault("avg_final_score", round(sum(float(x["final_score"]) for x in reps_list) / n, 1))
+            summary.setdefault("avg_rom_score", round(sum(float(x["rom_score"]) for x in reps_list) / n, 1))
+            summary.setdefault("avg_stability_score", round(sum(float(x["stability_score"]) for x in reps_list) / n, 1))
+            summary.setdefault("avg_tempo_score", round(sum(float(x["tempo_score"]) for x in reps_list) / n, 1))
+            summary.setdefault("avg_asymmetry_score", round(sum(float(x["asymmetry_score"]) for x in reps_list) / n, 1))
+            summary["reps"] = reps_list
+            session["summary"] = summary
+
+    ai_feedback = session.get("ai_feedback_cache")
+    pdf_bytes = await asyncio.to_thread(build_session_pdf, session, patient, ai_feedback)
+
+    ex_slug = _safe_filename_part(str(session.get("exercise_name") or "exercise"))
+    filename = f"rehab-{ex_slug}-{session_id[-6:]}.pdf"
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={
+            "Content-Disposition": f'attachment; filename="{filename}"',
+            "Cache-Control": "no-store",
+        },
+    )
+
+
+@router.get("/progress/report.pdf")
+async def download_progress_report_pdf(
+    patient: dict = Depends(require_role({"patient"})),
+    db: AsyncIOMotorDatabase = Depends(get_db),
+) -> Response:
+    pid = ObjectId(patient["id"])
+    progress = await my_progress(None, patient, db)
+    recovery_data = await get_recovery_score(patient, db)
+    sessions = [
+        serialize_doc(doc)
+        async for doc in db.sessions.find({"patient_id": pid}).sort("started_at", -1).limit(50)
+    ]
+    pain_logs = [
+        serialize_doc(doc)
+        async for doc in db.pain_logs.find({"patient_id": pid}).sort("created_at", -1).limit(20)
+    ]
+    user_doc = await db.users.find_one({"_id": pid})
+    ai_insight = (user_doc or {}).get("cached_ai_insight", {}).get("insight")
+
+    pdf_bytes = await asyncio.to_thread(
+        build_progress_pdf,
+        patient,
+        progress,
+        sessions,
+        pain_logs,
+        recovery_data,
+        ai_insight,
+    )
+    user_slug = _safe_filename_part(str(patient.get("username") or patient.get("name") or "patient"))
+    filename = f"rehab-progress-{user_slug}.pdf"
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={
+            "Content-Disposition": f'attachment; filename="{filename}"',
+            "Cache-Control": "no-store",
+        },
+    )
+
 
 

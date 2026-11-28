@@ -174,6 +174,12 @@ export class BhashiniTTSService {
     await this.speak(this.phrase(key));
   }
 
+  /** Exercise-aware stage phrase — picks right words for arm raises, heel raises etc. */
+  async sayPhraseForExercise(stageKey: string, _exerciseName: string): Promise<void> {
+    // bhashiniTTS (fallback) uses generic phrases — ElevenLabs handles the smart mapping
+    await this.sayPhrase(stageKey);
+  }
+
   /** Speak arbitrary text using the browser's Speech Synthesis */
   async speak(text: string): Promise<void> {
     if (!text.trim() || !("speechSynthesis" in window)) return;

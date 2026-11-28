@@ -4,7 +4,17 @@ import {
   BarChart, Bar, LineChart, Line
 } from 'recharts';
 
-import { getPatientProgress, getPatientSessions, getPatientFeedback, getPatientSessionAiFeedback, getGlobalAiInsights, getPatientRecoveryScore, getPatientPainLogs } from "../lib/api";
+import {
+  downloadPatientProgressPdf,
+  downloadPatientSessionPdf,
+  getGlobalAiInsights,
+  getPatientFeedback,
+  getPatientPainLogs,
+  getPatientProgress,
+  getPatientRecoveryScore,
+  getPatientSessionAiFeedback,
+  getPatientSessions,
+} from "../lib/api";
 import { useAuth } from "../lib/auth";
 import type { SessionDoc } from "../lib/types";
 
@@ -93,7 +103,15 @@ function feedbackCategoryLabel(category: string): string {
   }
 }
 
-function ExpandedSessionView({ session }: { session: SessionDoc }) {
+function ExpandedSessionView({
+  session,
+  downloading,
+  onDownloadPdf,
+}: {
+  session: SessionDoc;
+  downloading: boolean;
+  onDownloadPdf: (sessionId: string) => void;
+}) {
   const { accessToken } = useAuth();
   const [aiFeedback, setAiFeedback] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -110,8 +128,24 @@ function ExpandedSessionView({ session }: { session: SessionDoc }) {
   const repsData = session.summary?.reps || [];
 
   return (
-    <div className="expanded-session-content" style={{ padding: "1.25rem", borderTop: "1px solid var(--border-subtle)", background: "rgba(0,0,0,0.2)" }}>
-      <h4 style={{ margin: "0 0 1rem 0", color: "var(--accent-cyan)", fontSize: "0.95rem" }}>Performance Breakdown (Per Rep)</h4>
+    <div className="expanded-session-content" style={{ padding: "1.25rem", borderTop: "1px solid var(--border-subtle)", background: "var(--bg-input)" }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "0.75rem", flexWrap: "wrap", marginBottom: "1rem" }}>
+        <h4 style={{ margin: 0, color: "var(--accent-cyan)", fontSize: "0.95rem" }}>Performance Breakdown (Per Rep)</h4>
+        <button
+          type="button"
+          className="btn-secondary"
+          disabled={downloading}
+          onClick={() => onDownloadPdf(session.id)}
+          style={{ padding: "0.4rem 0.85rem", fontSize: "0.8rem" }}
+        >
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+            <polyline points="7 10 12 15 17 10" />
+            <line x1="12" y1="15" x2="12" y2="3" />
+          </svg>
+          {downloading ? "Generating PDF..." : "Download Session PDF"}
+        </button>
+      </div>
       {repsData.length > 0 ? (
         <div style={{ height: "200px", width: "100%", marginBottom: "1.5rem" }}>
           <ResponsiveContainer width="100%" height="100%">
@@ -184,6 +218,34 @@ export function PatientProgressPage() {
   const [painScoreInput, setPainScoreInput] = useState<number>(0);
   const [painSubmitting, setPainSubmitting] = useState(false);
   const [painSuccess, setPainSuccess] = useState<string | null>(null);
+  const [downloadingPdfId, setDownloadingPdfId] = useState<string | null>(null);
+  const [pdfError, setPdfError] = useState<string | null>(null);
+
+  const handleDownloadSessionPdf = async (sessionId: string) => {
+    if (!accessToken) return;
+    setDownloadingPdfId(sessionId);
+    setPdfError(null);
+    try {
+      await downloadPatientSessionPdf(accessToken, sessionId);
+    } catch (err) {
+      setPdfError(err instanceof Error ? err.message : "Failed to download session PDF");
+    } finally {
+      setDownloadingPdfId(null);
+    }
+  };
+
+  const handleDownloadProgressPdf = async () => {
+    if (!accessToken) return;
+    setDownloadingPdfId("progress");
+    setPdfError(null);
+    try {
+      await downloadPatientProgressPdf(accessToken);
+    } catch (err) {
+      setPdfError(err instanceof Error ? err.message : "Failed to download progress PDF");
+    } finally {
+      setDownloadingPdfId(null);
+    }
+  };
 
   const submitPain = async () => {
     if (!accessToken) return;
@@ -271,12 +333,45 @@ export function PatientProgressPage() {
   return (
     <div className="analytics-layout" id="analytics-page">
       {/* Header */}
-      <div className="analytics-header">
+      <div className="analytics-header" style={{ flexWrap: "wrap", gap: "1rem" }}>
         <div>
           <h1 className="page-title">Analytics Dashboard</h1>
           <p className="page-subtitle">Your rehabilitation journey at a glance</p>
         </div>
+        <div style={{ display: "flex", gap: "0.65rem", flexWrap: "wrap", alignItems: "center" }}>
+          {sessions.length > 0 && (
+            <button
+              type="button"
+              className="btn-secondary"
+              disabled={downloadingPdfId !== null}
+              onClick={() => void handleDownloadSessionPdf(sessions[0].id)}
+            >
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                <polyline points="14 2 14 8 20 8" />
+                <line x1="16" y1="13" x2="8" y2="13" />
+                <line x1="16" y1="17" x2="8" y2="17" />
+              </svg>
+              {downloadingPdfId === sessions[0].id ? "Generating..." : "Latest Session PDF"}
+            </button>
+          )}
+          <button
+            type="button"
+            className="btn-primary"
+            disabled={downloadingPdfId !== null}
+            onClick={() => void handleDownloadProgressPdf()}
+          >
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+              <polyline points="7 10 12 15 17 10" />
+              <line x1="12" y1="15" x2="12" y2="3" />
+            </svg>
+            {downloadingPdfId === "progress" ? "Generating PDF..." : "Download Progress PDF"}
+          </button>
+        </div>
       </div>
+
+      {pdfError && <div className="error-text">{pdfError}</div>}
 
       {/* Stat Cards Row */}
       <div className="analytics-stats-row">
@@ -504,6 +599,24 @@ export function PatientProgressPage() {
                         <div className={`status-badge ${session.status === "completed" ? "live" : "idle"}`}>
                           {session.status}
                         </div>
+                        <button
+                          type="button"
+                          className="btn-secondary"
+                          disabled={downloadingPdfId === session.id}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            void handleDownloadSessionPdf(session.id);
+                          }}
+                          title="Download Session Report PDF"
+                          style={{ padding: "0.35rem 0.65rem", fontSize: "0.75rem", gap: "0.3rem" }}
+                        >
+                          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                            <polyline points="7 10 12 15 17 10" />
+                            <line x1="12" y1="15" x2="12" y2="3" />
+                          </svg>
+                          {downloadingPdfId === session.id ? "..." : "PDF"}
+                        </button>
                         <svg 
                           width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"
                           style={{
@@ -517,7 +630,11 @@ export function PatientProgressPage() {
                       </div>
                     </div>
                     {expandedSessionId === session.id && (
-                      <ExpandedSessionView session={session} />
+                      <ExpandedSessionView
+                        session={session}
+                        downloading={downloadingPdfId === session.id}
+                        onDownloadPdf={(sid) => void handleDownloadSessionPdf(sid)}
+                      />
                     )}
                   </div>
                 ))}

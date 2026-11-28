@@ -5,7 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from api_server.config import get_settings
 from api_server.database import mongo
-from api_server.routers import auth, doctor, exercises, patient, ws, ai_feedback, admin, health
+from api_server.routers import auth, doctor, exercises, patient, ws, ai_feedback, admin, health, tts
 from ml_scoring.ml_scorer import preload_models
 
 @asynccontextmanager
@@ -46,6 +46,7 @@ api_router.include_router(ws.router)
 api_router.include_router(ai_feedback.router)
 api_router.include_router(admin.router)
 api_router.include_router(health.router)
+api_router.include_router(tts.router)
 
 
 @api_router.get("/health")

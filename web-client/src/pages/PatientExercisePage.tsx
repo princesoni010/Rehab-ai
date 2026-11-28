@@ -2,18 +2,18 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { PoseLandmarker, FilesetResolver } from "@mediapipe/tasks-vision";
 
-import { getPatientAssignments, postPatientPainLog } from "../lib/api";
+import { downloadPatientSessionPdf, getPatientAssignments, postPatientPainLog } from "../lib/api";
 import { useAuth } from "../lib/auth";
 import { useImmersive } from "../lib/ImmersiveContext";
 import type { Assignment, RepEvent } from "../lib/types";
 import { ScoreRing } from "../components/ScoreRing";
 import { RepCard, scoreClass } from "../components/RepCard";
 import {
-  BhashiniTTSService,
+  ElevenLabsTTSService as BhashiniTTSService,
   SUPPORTED_LANGUAGES,
   buildRepSpeech,
   buildSetSpeech,
-} from "../lib/bhashiniTTS";
+} from "../lib/elevenLabsTTS";
 
 const WS_BASE = import.meta.env.VITE_WS_BASE_URL ?? (
   typeof window !== "undefined"
@@ -78,7 +78,12 @@ export function PatientExercisePage() {
 
   // Create / re-create TTS service when language changes
   useEffect(() => {
-    ttsRef.current = new BhashiniTTSService("", "", voiceLang);
+    const svc = new BhashiniTTSService("", "", voiceLang);
+    ttsRef.current = svc;
+    // Pre-warm common phrases so first playback is instant
+    void svc.prewarm([
+      "session_started", "get_ready", "rest_time", "all_done", "up", "down", "keep_going",
+    ]);
   }, [voiceLang]);
 
   // Auto-dismiss popup
@@ -91,8 +96,11 @@ export function PatientExercisePage() {
 
   // Session summary
   const [sessionEnded, setSessionEnded] = useState(false);
+  const [lastSessionId, setLastSessionId] = useState<string | null>(null);
+  const [downloadingPdf, setDownloadingPdf] = useState(false);
   const [sessionStartTime, setSessionStartTime] = useState<number | null>(null);
   const [elapsedTime, setElapsedTime] = useState(0);
+  const repCountRef = useRef(0);
 
   // UI state
   const [repDrawerOpen, setRepDrawerOpen] = useState(false);
@@ -248,19 +256,38 @@ export function PatientExercisePage() {
 
   async function initDetector() {
     if (detectorRef.current) return detectorRef.current;
-    const vision = await FilesetResolver.forVisionTasks(
-      "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@latest/wasm"
-    );
-    const detector = await PoseLandmarker.createFromOptions(vision, {
-      baseOptions: {
-        modelAssetPath:
-          "https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/latest/pose_landmarker_lite.task",
-      },
-      runningMode: "VIDEO",
-      numPoses: 1,
-    });
-    detectorRef.current = detector;
-    return detector;
+
+    const loadLandmarker = async (wasmBase: string, modelPath: string) => {
+      const vision = await FilesetResolver.forVisionTasks(wasmBase);
+      return PoseLandmarker.createFromOptions(vision, {
+        baseOptions: { modelAssetPath: modelPath },
+        runningMode: "VIDEO",
+        numPoses: 1,
+      });
+    };
+
+    try {
+      const detector = await loadLandmarker(
+        "/mediapipe/wasm",
+        "/mediapipe/pose_landmarker_lite.task"
+      );
+      detectorRef.current = detector;
+      return detector;
+    } catch (localErr) {
+      console.warn("Local MediaPipe load failed, falling back to CDN:", localErr);
+      try {
+        const detector = await loadLandmarker(
+          "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@latest/wasm",
+          "https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/latest/pose_landmarker_lite.task"
+        );
+        detectorRef.current = detector;
+        return detector;
+      } catch {
+        throw new Error(
+          "Failed to load pose detection model. Check local model files or internet connection."
+        );
+      }
+    }
   }
 
   function startCamera() {
@@ -277,6 +304,9 @@ export function PatientExercisePage() {
 
     setRunning(true);
     setRepCount(0);
+    repCountRef.current = 0;
+    setLastSessionId(null);
+    setSessionEnded(false);
     setTargetReps(selectedAssignment.target_reps);
     setCurrentSet(1);
     setTargetSets(1);
@@ -334,6 +364,7 @@ export function PatientExercisePage() {
         }
         if (data.type === "session_started") {
           setFeedback("Session started — keep posture stable.");
+          setLastSessionId(data.session_id ?? null);
           setTargetReps(data.target_reps ?? 0);
           setTargetSets(data.target_sets ?? 1);
           setRestIntervalSeconds(data.rest_interval_seconds ?? 60);
@@ -344,7 +375,9 @@ export function PatientExercisePage() {
           return;
         }
         if (data.type === "frame_feedback") {
-          setRepCount(data.counter ?? 0);
+          const nextCount = data.counter ?? 0;
+          repCountRef.current = nextCount;
+          setRepCount(nextCount);
           setStage(data.stage ?? "-");
           setSway(data.sway ?? 0);
 
@@ -355,7 +388,9 @@ export function PatientExercisePage() {
           // 🔊 Voice: speak on stage change (not every frame)
           if (voiceEnabledRef.current && data.stage && data.stage !== lastSpokenStageRef.current) {
             lastSpokenStageRef.current = data.stage;
-            ttsRef.current?.sayPhrase(data.stage);
+            // Pass exercise name so TTS can pick the right phrase
+            const exerciseName = selectedAssignment?.exercise_name ?? "";
+            ttsRef.current?.sayPhraseForExercise(data.stage, exerciseName);
           }
 
           if (data.rep_event) {
@@ -579,7 +614,7 @@ export function PatientExercisePage() {
     }
     setRunning(false);
     setWsStatus("Disconnected");
-    if (repCount > 0) {
+    if (repCountRef.current > 0) {
       setSessionEnded(true);
     }
   };
@@ -599,8 +634,21 @@ export function PatientExercisePage() {
     setRunning(false);
     if (!save) {
       setSessionEnded(false);
-    } else if (repCount > 0) {
+    } else if (repCountRef.current > 0) {
       setSessionEnded(true);
+    }
+  };
+
+  const handleDownloadSessionPdf = async () => {
+    if (!accessToken || !lastSessionId) return;
+    setDownloadingPdf(true);
+    setError(null);
+    try {
+      await downloadPatientSessionPdf(accessToken, lastSessionId);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not generate session PDF");
+    } finally {
+      setDownloadingPdf(false);
     }
   };
 
@@ -621,6 +669,63 @@ export function PatientExercisePage() {
   const sessionDuration = sessionStartTime
     ? Math.round((Date.now() - sessionStartTime) / 1000)
     : 0;
+
+  const painLoggerModal = showPainLogger ? (
+    <div style={{
+      position: "fixed", top: 0, left: 0, width: "100%", height: "100%",
+      display: "flex", alignItems: "center", justifyContent: "center",
+      background: "rgba(0,0,0,0.85)", zIndex: 9999, backdropFilter: "blur(12px)",
+      animation: "fadeIn 0.3s ease-out"
+    }}>
+      <div className="glass-card" style={{ width: "90%", maxWidth: "450px", padding: "2.5rem", textAlign: "center", border: "1px solid rgba(255, 255, 255, 0.1)" }}>
+        <h2 style={{ color: "var(--accent-coral)", marginBottom: "0.5rem", fontSize: "1.8rem" }}>Session Complete! 🎉</h2>
+        <p style={{ color: "var(--text-secondary)", marginBottom: "2rem", fontSize: "1.05rem" }}>Please log your current pain level or download your session report.</p>
+
+        <div style={{ display: "flex", alignItems: "center", gap: "1.5rem", marginBottom: "2rem" }}>
+          <input
+            type="range"
+            min="0" max="10"
+            value={painScoreInput}
+            onChange={e => setPainScoreInput(Number(e.target.value))}
+            style={{ flex: 1, accentColor: "var(--accent-coral)", height: "8px" }}
+          />
+          <span style={{ fontSize: "2rem", fontWeight: "bold", color: "var(--text-primary)", width: "40px" }}>{painScoreInput}</span>
+        </div>
+
+        <div style={{ display: "flex", flexDirection: "column", gap: "0.75rem" }}>
+          {lastSessionId && (
+            <button
+              type="button"
+              className="btn-secondary"
+              onClick={() => void handleDownloadSessionPdf()}
+              disabled={downloadingPdf}
+              style={{ width: "100%", padding: "0.85rem", fontSize: "0.98rem", borderRadius: "12px" }}
+            >
+              {downloadingPdf ? "Generating PDF..." : "Download Session PDF Report"}
+            </button>
+          )}
+          <button
+            className="btn-primary"
+            onClick={async () => {
+              setPainSubmitting(true);
+              try {
+                await postPatientPainLog(accessToken ?? "", painScoreInput, "General Session Pain", "Logged at end of session");
+              } catch (e) {
+                console.error(e);
+              }
+              setPainSubmitting(false);
+              setShowPainLogger(false);
+              navigate("/patient/progress");
+            }}
+            disabled={painSubmitting}
+            style={{ width: "100%", background: "var(--accent-coral)", borderColor: "var(--accent-coral)", padding: "1rem", fontSize: "1.05rem", borderRadius: "12px", color: "#fff" }}
+          >
+            {painSubmitting ? "Saving..." : "Submit & View Progress"}
+          </button>
+        </div>
+      </div>
+    </div>
+  ) : null;
 
   // ─── NON-IMMERSIVE: assignment selection screen ───
   if (!cameraActive) {
@@ -754,15 +859,34 @@ export function PatientExercisePage() {
               </div>
             )}
             
-            <button
-              className="btn-primary"
-              onClick={() => setShowPainLogger(true)}
-              style={{ width: "100%", marginTop: "2rem", padding: "1rem", fontSize: "1.1rem", background: "var(--accent-coral)", borderColor: "var(--accent-coral)" }}
-            >
-              Log Pain & Complete Session
-            </button>
+            <div style={{ display: "flex", gap: "0.85rem", flexWrap: "wrap", marginTop: "2rem" }}>
+              {lastSessionId && (
+                <button
+                  type="button"
+                  className="btn-secondary"
+                  disabled={downloadingPdf}
+                  onClick={() => void handleDownloadSessionPdf()}
+                  style={{ flex: "1 1 200px", padding: "1rem", fontSize: "1rem" }}
+                >
+                  <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                    <polyline points="7 10 12 15 17 10" />
+                    <line x1="12" y1="15" x2="12" y2="3" />
+                  </svg>
+                  {downloadingPdf ? "Generating PDF..." : "Download Session PDF"}
+                </button>
+              )}
+              <button
+                className="btn-primary"
+                onClick={() => setShowPainLogger(true)}
+                style={{ flex: "1 1 200px", padding: "1rem", fontSize: "1.05rem", background: "var(--accent-coral)", borderColor: "var(--accent-coral)" }}
+              >
+                Log Pain & Complete Session
+              </button>
+            </div>
           </div>
         )}
+        {painLoggerModal}
       </div>
     );
   }
@@ -850,21 +974,26 @@ export function PatientExercisePage() {
             {showLangPicker && (
               <div style={{
                 position: "absolute", top: "110%", right: 0, zIndex: 200,
-                background: "rgba(20,20,30,0.97)", border: "1px solid rgba(255,255,255,0.15)",
+                background: "#0f1120",
+                border: "1px solid rgba(6,182,212,0.4)",
                 borderRadius: "10px", padding: "0.5rem", display: "flex", flexDirection: "column",
                 gap: "2px", minWidth: "140px", backdropFilter: "blur(12px)",
-                boxShadow: "0 8px 24px rgba(0,0,0,0.5)"
+                boxShadow: "0 8px 24px rgba(0,0,0,0.8)"
               }}>
                 {SUPPORTED_LANGUAGES.map(l => (
                   <button
                     key={l.code}
                     onClick={() => { setVoiceLang(l.code); setShowLangPicker(false); lastSpokenStageRef.current = ""; }}
                     style={{
-                      background: voiceLang === l.code ? "rgba(6,182,212,0.2)" : "transparent",
-                      border: "none", color: voiceLang === l.code ? "var(--accent-cyan)" : "var(--text-primary)",
+                      background: voiceLang === l.code ? "rgba(6,182,212,0.25)" : "transparent",
+                      border: voiceLang === l.code ? "1px solid rgba(6,182,212,0.5)" : "1px solid transparent",
+                      color: voiceLang === l.code ? "#06b6d4" : "#ffffff",
                       padding: "0.4rem 0.75rem", borderRadius: "6px", cursor: "pointer",
-                      textAlign: "left", fontSize: "0.9rem", fontFamily: "inherit"
+                      textAlign: "left", fontSize: "0.9rem", fontFamily: "inherit",
+                      fontWeight: voiceLang === l.code ? 600 : 400,
                     }}
+                    onMouseEnter={(e) => { if (voiceLang !== l.code) (e.currentTarget as HTMLButtonElement).style.background = "rgba(255,255,255,0.1)"; }}
+                    onMouseLeave={(e) => { if (voiceLang !== l.code) (e.currentTarget as HTMLButtonElement).style.background = "transparent"; }}
                   >
                     {l.label}
                   </button>
@@ -990,49 +1119,7 @@ export function PatientExercisePage() {
       )}
 
       {/* End of Session Pain Logger Modal */}
-      {showPainLogger && (
-        <div style={{
-          position: "fixed", top: 0, left: 0, width: "100%", height: "100%",
-          display: "flex", alignItems: "center", justifyContent: "center",
-          background: "rgba(0,0,0,0.85)", zIndex: 9999, backdropFilter: "blur(12px)",
-          animation: "fadeIn 0.3s ease-out"
-        }}>
-          <div className="glass-card" style={{ width: "90%", maxWidth: "450px", padding: "2.5rem", textAlign: "center", border: "1px solid rgba(255, 255, 255, 0.1)" }}>
-            <h2 style={{ color: "var(--accent-coral)", marginBottom: "0.5rem", fontSize: "1.8rem" }}>Session Complete! 🎉</h2>
-            <p style={{ color: "var(--text-secondary)", marginBottom: "2.5rem", fontSize: "1.1rem" }}>Please log your current pain level before continuing.</p>
-            
-            <div style={{ display: "flex", alignItems: "center", gap: "1.5rem", marginBottom: "2.5rem" }}>
-              <input 
-                type="range" 
-                min="0" max="10" 
-                value={painScoreInput} 
-                onChange={e => setPainScoreInput(Number(e.target.value))}
-                style={{ flex: 1, accentColor: "var(--accent-coral)", height: "8px" }}
-              />
-              <span style={{ fontSize: "2rem", fontWeight: "bold", color: "var(--text-primary)", width: "40px" }}>{painScoreInput}</span>
-            </div>
-            
-            <button 
-              className="btn-primary" 
-              onClick={async () => {
-                setPainSubmitting(true);
-                try {
-                  await postPatientPainLog(accessToken ?? "", painScoreInput, "General Session Pain", "Logged at end of session");
-                } catch (e) {
-                  console.error(e);
-                }
-                setPainSubmitting(false);
-                setShowPainLogger(false);
-                navigate("/patient/progress");
-              }}
-              disabled={painSubmitting}
-              style={{ width: "100%", background: "var(--accent-coral)", borderColor: "var(--accent-coral)", padding: "1rem", fontSize: "1.1rem", borderRadius: "12px", color: "#fff" }}
-            >
-              {painSubmitting ? "Saving..." : "Submit & View Progress"}
-            </button>
-          </div>
-        </div>
-      )}
+      {painLoggerModal}
 
       {error && (
         <div className="hud-error">

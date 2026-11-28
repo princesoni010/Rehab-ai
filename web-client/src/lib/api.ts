@@ -15,6 +15,17 @@ import type {
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? "/api/v1";
 
+/** Wrap fetch so connection failures give a clear diagnostic instead of raw "Failed to fetch". */
+async function apiFetch(path: string, init?: RequestInit): Promise<Response> {
+  try {
+    return await fetch(`${API_BASE}${path}`, init);
+  } catch {
+    throw new Error(
+      "Cannot connect to backend API server. Make sure the FastAPI backend is running on port 8000."
+    );
+  }
+}
+
 async function parseJson<T>(response: Response): Promise<T> {
   if (!response.ok) {
     let message = `Request failed with ${response.status}`;
@@ -38,7 +49,7 @@ export async function register(payload: {
   password: string;
   role: RoleType;
 }): Promise<TokenResponse> {
-  const res = await fetch(`${API_BASE}/auth/register`, {
+  const res = await apiFetch("/auth/register", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
@@ -47,7 +58,7 @@ export async function register(payload: {
 }
 
 export async function login(email: string, password: string): Promise<TokenResponse> {
-  const res = await fetch(`${API_BASE}/auth/login`, {
+  const res = await apiFetch("/auth/login", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ email, password }),
@@ -56,7 +67,7 @@ export async function login(email: string, password: string): Promise<TokenRespo
 }
 
 export async function refresh(refreshToken: string): Promise<TokenResponse> {
-  const res = await fetch(`${API_BASE}/auth/refresh`, {
+  const res = await apiFetch("/auth/refresh", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ refresh_token: refreshToken }),
@@ -65,21 +76,21 @@ export async function refresh(refreshToken: string): Promise<TokenResponse> {
 }
 
 export async function me(accessToken: string): Promise<UserProfile> {
-  const res = await fetch(`${API_BASE}/auth/me`, {
+  const res = await apiFetch("/auth/me", {
     headers: { Authorization: `Bearer ${accessToken}` },
   });
   return parseJson<UserProfile>(res);
 }
 
 export async function getExercises(accessToken: string): Promise<ExerciseInfo[]> {
-  const res = await fetch(`${API_BASE}/exercises`, {
+  const res = await apiFetch("/exercises", {
     headers: { Authorization: `Bearer ${accessToken}` },
   });
   return parseJson<ExerciseInfo[]>(res);
 }
 
 export async function getDoctorPatients(accessToken: string): Promise<UserProfile[]> {
-  const res = await fetch(`${API_BASE}/doctor/patients`, {
+  const res = await apiFetch("/doctor/patients", {
     headers: { Authorization: `Bearer ${accessToken}` },
   });
   const body = await parseJson<{ patients: UserProfile[] }>(res);
@@ -92,7 +103,7 @@ export async function getDoctorPatientAssignmentStats(
 ): Promise<PatientAssignmentStats[]> {
   const q = query.trim();
   const suffix = q ? `?q=${encodeURIComponent(q)}` : "";
-  const res = await fetch(`${API_BASE}/doctor/patients/assignment-stats${suffix}`, {
+  const res = await apiFetch(`/doctor/patients/assignment-stats${suffix}`, {
     headers: { Authorization: `Bearer ${accessToken}` },
   });
   const body = await parseJson<{ stats: PatientAssignmentStats[] }>(res);
@@ -103,7 +114,7 @@ export async function searchDoctorPatients(
   accessToken: string,
   query: string
 ): Promise<PatientSearchResult[]> {
-  const res = await fetch(`${API_BASE}/doctor/patients/search?q=${encodeURIComponent(query)}`, {
+  const res = await apiFetch(`/doctor/patients/search?q=${encodeURIComponent(query)}`, {
     headers: { Authorization: `Bearer ${accessToken}` },
   });
   const body = await parseJson<{ patients: PatientSearchResult[] }>(res);
@@ -121,7 +132,7 @@ export async function linkPatient(
       ? { patient_email: lookup.toLowerCase() }
       : { patient_username: lookup.toLowerCase() };
 
-  const res = await fetch(`${API_BASE}/doctor/patients/link`, {
+  const res = await apiFetch("/doctor/patients/link", {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -136,7 +147,7 @@ export async function createDoctorPatient(
   accessToken: string,
   payload: { name: string; email: string; username?: string; password?: string }
 ): Promise<UserProfile> {
-  const res = await fetch(`${API_BASE}/doctor/patients/create`, {
+  const res = await apiFetch("/doctor/patients/create", {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -160,7 +171,7 @@ export async function createAssignment(
     notes?: string;
   }
 ): Promise<Assignment> {
-  const res = await fetch(`${API_BASE}/doctor/assignments`, {
+  const res = await apiFetch("/doctor/assignments", {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -172,14 +183,14 @@ export async function createAssignment(
 }
 
 export async function getDoctorReport(accessToken: string, patientId: string): Promise<any> {
-  const res = await fetch(`${API_BASE}/doctor/patients/${patientId}/report`, {
+  const res = await apiFetch(`/doctor/patients/${patientId}/report`, {
     headers: { Authorization: `Bearer ${accessToken}` },
   });
   return parseJson<any>(res);
 }
 
 export async function getDoctorPatientAssignments(accessToken: string, patientId: string): Promise<Assignment[]> {
-  const res = await fetch(`${API_BASE}/doctor/patients/${patientId}/assignments`, {
+  const res = await apiFetch(`/doctor/patients/${patientId}/assignments`, {
     headers: { Authorization: `Bearer ${accessToken}` },
   });
   const body = await parseJson<{ assignments: Assignment[] }>(res);
@@ -191,7 +202,7 @@ export async function updateAssignment(
   assignmentId: string,
   payload: { target_reps?: number; target_sets?: number; rest_interval_seconds?: number }
 ): Promise<Assignment> {
-  const res = await fetch(`${API_BASE}/doctor/assignments/${assignmentId}`, {
+  const res = await apiFetch(`/doctor/assignments/${assignmentId}`, {
     method: "PUT",
     headers: {
       "Content-Type": "application/json",
@@ -207,7 +218,7 @@ export async function deleteAssignment(
   accessToken: string,
   assignmentId: string
 ): Promise<void> {
-  const res = await fetch(`${API_BASE}/doctor/assignments/${assignmentId}`, {
+  const res = await apiFetch(`/doctor/assignments/${assignmentId}`, {
     method: "DELETE",
     headers: { Authorization: `Bearer ${accessToken}` },
   });
@@ -215,7 +226,7 @@ export async function deleteAssignment(
 }
 
 export async function getDoctorPatientSessions(accessToken: string, patientId: string): Promise<SessionDoc[]> {
-  const res = await fetch(`${API_BASE}/doctor/patients/${patientId}/sessions`, {
+  const res = await apiFetch(`/doctor/patients/${patientId}/sessions`, {
     headers: { Authorization: `Bearer ${accessToken}` },
   });
   const body = await parseJson<{ sessions: SessionDoc[] }>(res);
@@ -223,7 +234,7 @@ export async function getDoctorPatientSessions(accessToken: string, patientId: s
 }
 
 export async function getDoctorSessionAiFeedback(accessToken: string, sessionId: string): Promise<string> {
-  const res = await fetch(`${API_BASE}/doctor/sessions/${sessionId}/ai-feedback`, {
+  const res = await apiFetch(`/doctor/sessions/${sessionId}/ai-feedback`, {
     headers: { Authorization: `Bearer ${accessToken}` },
   });
   const body = await parseJson<{ feedback: string }>(res);
@@ -235,7 +246,7 @@ export async function postSessionFeedback(
   sessionId: string,
   doctorFeedback: string
 ): Promise<void> {
-  await fetch(`${API_BASE}/doctor/sessions/${sessionId}/feedback`, {
+  const res = await apiFetch(`/doctor/sessions/${sessionId}/feedback`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -243,33 +254,96 @@ export async function postSessionFeedback(
     },
     body: JSON.stringify({ doctor_feedback: doctorFeedback }),
   });
+  await parseJson<Record<string, string>>(res);
 }
 
 export async function getPatientAssignments(accessToken: string): Promise<Assignment[]> {
-  const res = await fetch(`${API_BASE}/patient/assignments`, {
+  const res = await apiFetch("/patient/assignments", {
     headers: { Authorization: `Bearer ${accessToken}` },
   });
   const body = await parseJson<{ assignments: Assignment[] }>(res);
   return body.assignments;
 }
 
+export async function getPatientNotifications(accessToken: string): Promise<{
+  notifications: Array<{
+    id: string;
+    exercise_name: string;
+    target_reps: number;
+    target_sets: number;
+    rest_interval_seconds: number;
+    status: string;
+    notes?: string;
+    created_at: string;
+    is_today: boolean;
+  }>;
+  today_count: number;
+}> {
+  const res = await apiFetch("/patient/notifications", {
+    headers: { Authorization: `Bearer ${accessToken}` },
+  });
+  return parseJson(res);
+}
+
 export async function getPatientSessions(accessToken: string): Promise<SessionDoc[]> {
-  const res = await fetch(`${API_BASE}/patient/sessions`, {
+  const res = await apiFetch("/patient/sessions", {
     headers: { Authorization: `Bearer ${accessToken}` },
   });
   const body = await parseJson<{ sessions: SessionDoc[] }>(res);
   return body.sessions;
 }
 
+async function downloadPdf(accessToken: string, path: string, fallbackName: string): Promise<void> {
+  const res = await apiFetch(path, {
+    headers: { Authorization: `Bearer ${accessToken}` },
+  });
+  if (!res.ok) {
+    let message = `Failed to generate PDF (${res.status})`;
+    try {
+      const body = await res.json();
+      if (body?.detail) message = String(body.detail);
+    } catch {
+      /* ignore non-JSON error */
+    }
+    throw new Error(message);
+  }
+
+  const blob = await res.blob();
+  const disposition = res.headers.get("Content-Disposition") ?? "";
+  const match = disposition.match(/filename="?([^"]+)"?/i);
+  const filename = match?.[1] ?? fallbackName;
+
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+export async function downloadPatientSessionPdf(accessToken: string, sessionId: string): Promise<void> {
+  await downloadPdf(
+    accessToken,
+    `/patient/sessions/${encodeURIComponent(sessionId)}/report.pdf`,
+    `rehab-session-${sessionId.slice(-6)}.pdf`
+  );
+}
+
+export async function downloadPatientProgressPdf(accessToken: string): Promise<void> {
+  await downloadPdf(accessToken, "/patient/progress/report.pdf", "rehab-progress-report.pdf");
+}
+
 export async function getPatientProgress(accessToken: string): Promise<any> {
-  const res = await fetch(`${API_BASE}/patient/progress`, {
+  const res = await apiFetch("/patient/progress", {
     headers: { Authorization: `Bearer ${accessToken}` },
   });
   return parseJson<any>(res);
 }
 
 export async function getGlobalAiInsights(accessToken: string): Promise<string> {
-  const res = await fetch(`${API_BASE}/patient/progress/ai-insights`, {
+  const res = await apiFetch("/patient/progress/ai-insights", {
     headers: { Authorization: `Bearer ${accessToken}` },
   });
   const body = await parseJson<{ insights: string }>(res);
@@ -277,7 +351,7 @@ export async function getGlobalAiInsights(accessToken: string): Promise<string> 
 }
 
 export async function getPatientFeedback(accessToken: string): Promise<any[]> {
-  const res = await fetch(`${API_BASE}/patient/feedback`, {
+  const res = await apiFetch("/patient/feedback", {
     headers: { Authorization: `Bearer ${accessToken}` },
   });
   const body = await parseJson<{ feedback: any[] }>(res);
@@ -290,7 +364,7 @@ export async function postDoctorFeedback(
   message: string,
   category: string = "general"
 ): Promise<void> {
-  const res = await fetch(`${API_BASE}/doctor/patients/${patientId}/feedback`, {
+  const res = await apiFetch(`/doctor/patients/${patientId}/feedback`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -305,7 +379,7 @@ export async function getDoctorPatientFeedback(
   accessToken: string,
   patientId: string
 ): Promise<any[]> {
-  const res = await fetch(`${API_BASE}/doctor/patients/${patientId}/feedback`, {
+  const res = await apiFetch(`/doctor/patients/${patientId}/feedback`, {
     headers: { Authorization: `Bearer ${accessToken}` },
   });
   const body = await parseJson<{ feedback: any[] }>(res);
@@ -313,21 +387,21 @@ export async function getDoctorPatientFeedback(
 }
 
 export async function getPatientSessionAiFeedback(accessToken: string, sessionId: string): Promise<{ feedback: string }> {
-  const res = await fetch(`${API_BASE}/patient/sessions/${sessionId}/ai-feedback`, {
+  const res = await apiFetch(`/patient/sessions/${sessionId}/ai-feedback`, {
     headers: { Authorization: `Bearer ${accessToken}` },
   });
   return parseJson<{ feedback: string }>(res);
 }
 
 export async function getPatientRecoveryScore(accessToken: string): Promise<any> {
-  const res = await fetch(`${API_BASE}/patient/recovery-score`, {
+  const res = await apiFetch("/patient/recovery-score", {
     headers: { Authorization: `Bearer ${accessToken}` },
   });
   return parseJson<any>(res);
 }
 
 export async function getPatientPainLogs(accessToken: string): Promise<any[]> {
-  const res = await fetch(`${API_BASE}/patient/pain-logs`, {
+  const res = await apiFetch("/patient/pain-logs", {
     headers: { Authorization: `Bearer ${accessToken}` },
   });
   const body = await parseJson<{ pain_logs: any[] }>(res);
@@ -335,7 +409,7 @@ export async function getPatientPainLogs(accessToken: string): Promise<any[]> {
 }
 
 export async function postPatientPainLog(accessToken: string, score: number, location: string, notes: string): Promise<any> {
-  const res = await fetch(`${API_BASE}/patient/pain-logs`, {
+  const res = await apiFetch("/patient/pain-logs", {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -347,7 +421,7 @@ export async function postPatientPainLog(accessToken: string, score: number, loc
 }
 
 export async function getPatientRoadmap(accessToken: string): Promise<any> {
-  const res = await fetch(`${API_BASE}/patient/roadmap`, {
+  const res = await apiFetch("/patient/roadmap", {
     headers: { Authorization: `Bearer ${accessToken}` },
   });
   const body = await parseJson<{ roadmap: any }>(res);
@@ -355,7 +429,7 @@ export async function getPatientRoadmap(accessToken: string): Promise<any> {
 }
 
 export async function getDoctorPatientRecommendations(accessToken: string, patientId: string): Promise<any[]> {
-  const res = await fetch(`${API_BASE}/doctor/patients/${patientId}/recommendations`, {
+  const res = await apiFetch(`/doctor/patients/${patientId}/recommendations`, {
     headers: { Authorization: `Bearer ${accessToken}` },
   });
   const body = await parseJson<{ recommendations: any[] }>(res);
@@ -365,7 +439,7 @@ export async function getDoctorPatientRecommendations(accessToken: string, patie
 // ========== ADMIN APIS ==========
 
 export async function getAdminUsers(accessToken: string): Promise<UserProfile[]> {
-  const res = await fetch(`${API_BASE}/admin/users`, {
+  const res = await apiFetch("/admin/users", {
     headers: { Authorization: `Bearer ${accessToken}` },
   });
   const body = await parseJson<{ users: UserProfile[] }>(res);
@@ -376,7 +450,7 @@ export async function createAdminUser(
   accessToken: string,
   payload: { name: string; email: string; username: string; password: string; role: RoleType }
 ): Promise<UserProfile> {
-  const res = await fetch(`${API_BASE}/admin/users`, {
+  const res = await apiFetch("/admin/users", {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -392,7 +466,7 @@ export async function updateAdminUser(
   userId: string,
   payload: { name?: string; email?: string; username?: string; password?: string; role?: RoleType }
 ): Promise<UserProfile> {
-  const res = await fetch(`${API_BASE}/admin/users/${userId}`, {
+  const res = await apiFetch(`/admin/users/${userId}`, {
     method: "PUT",
     headers: {
       "Content-Type": "application/json",
@@ -404,7 +478,7 @@ export async function updateAdminUser(
 }
 
 export async function deleteAdminUser(accessToken: string, userId: string): Promise<void> {
-  const res = await fetch(`${API_BASE}/admin/users/${userId}`, {
+  const res = await apiFetch(`/admin/users/${userId}`, {
     method: "DELETE",
     headers: { Authorization: `Bearer ${accessToken}` },
   });
@@ -412,7 +486,7 @@ export async function deleteAdminUser(accessToken: string, userId: string): Prom
 }
 
 export async function getAdminExercises(accessToken: string): Promise<ExerciseCatalogItem[]> {
-  const res = await fetch(`${API_BASE}/admin/exercises`, {
+  const res = await apiFetch("/admin/exercises", {
     headers: { Authorization: `Bearer ${accessToken}` },
   });
   return parseJson<ExerciseCatalogItem[]>(res);
@@ -430,7 +504,7 @@ export async function createAdminExercise(
     acceptable_sway?: number;
   }
 ): Promise<ExerciseCatalogItem> {
-  const res = await fetch(`${API_BASE}/admin/exercises`, {
+  const res = await apiFetch("/admin/exercises", {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -454,7 +528,7 @@ export async function updateAdminExercise(
     acceptable_sway?: number;
   }
 ): Promise<ExerciseCatalogItem> {
-  const res = await fetch(`${API_BASE}/admin/exercises/${exerciseId}`, {
+  const res = await apiFetch(`/admin/exercises/${exerciseId}`, {
     method: "PUT",
     headers: {
       "Content-Type": "application/json",
@@ -466,7 +540,7 @@ export async function updateAdminExercise(
 }
 
 export async function deleteAdminExercise(accessToken: string, exerciseId: string): Promise<void> {
-  const res = await fetch(`${API_BASE}/admin/exercises/${exerciseId}`, {
+  const res = await apiFetch(`/admin/exercises/${exerciseId}`, {
     method: "DELETE",
     headers: { Authorization: `Bearer ${accessToken}` },
   });
@@ -476,7 +550,7 @@ export async function deleteAdminExercise(accessToken: string, exerciseId: strin
 // ========== HEALTH APIS ==========
 
 export async function getHealthProfile(accessToken: string): Promise<HealthProfile | null> {
-  const res = await fetch(`${API_BASE}/health/profile`, {
+  const res = await apiFetch("/health/profile", {
     headers: { Authorization: `Bearer ${accessToken}` },
   });
   if (res.status === 200) {
@@ -485,15 +559,19 @@ export async function getHealthProfile(accessToken: string): Promise<HealthProfi
   return null;
 }
 
-export async function saveHealthProfile(accessToken: string, payload: {
-  height_cm: number;
-  weight_kg: number;
-  medical_conditions?: string;
-  allergies?: string;
-  emergency_contact?: string;
-}): Promise<HealthProfile> {
-  const res = await fetch(`${API_BASE}/health/profile`, {
-    method: "POST",
+export async function saveHealthProfile(
+  accessToken: string,
+  payload: {
+    height_cm: number;
+    weight_kg: number;
+    medical_conditions?: string;
+    allergies?: string;
+    emergency_contact?: string;
+  },
+  isUpdate = false
+): Promise<HealthProfile> {
+  const res = await apiFetch("/health/profile", {
+    method: isUpdate ? "PUT" : "POST",
     headers: {
       "Content-Type": "application/json",
       Authorization: `Bearer ${accessToken}`,
@@ -504,7 +582,7 @@ export async function saveHealthProfile(accessToken: string, payload: {
 }
 
 export async function getVitals(accessToken: string): Promise<VitalSigns[]> {
-  const res = await fetch(`${API_BASE}/health/vitals`, {
+  const res = await apiFetch("/health/vitals", {
     headers: { Authorization: `Bearer ${accessToken}` },
   });
   return parseJson<VitalSigns[]>(res);
@@ -518,7 +596,7 @@ export async function saveVitals(accessToken: string, payload: {
   temperature_c?: number;
   notes?: string;
 }): Promise<VitalSigns> {
-  const res = await fetch(`${API_BASE}/health/vitals`, {
+  const res = await apiFetch("/health/vitals", {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -530,7 +608,7 @@ export async function saveVitals(accessToken: string, payload: {
 }
 
 export async function getHealthGoals(accessToken: string): Promise<HealthGoal[]> {
-  const res = await fetch(`${API_BASE}/health/goals`, {
+  const res = await apiFetch("/health/goals", {
     headers: { Authorization: `Bearer ${accessToken}` },
   });
   return parseJson<HealthGoal[]>(res);
@@ -543,7 +621,7 @@ export async function saveHealthGoal(accessToken: string, payload: {
   target_date?: string;
   description?: string;
 }): Promise<HealthGoal> {
-  const res = await fetch(`${API_BASE}/health/goals`, {
+  const res = await apiFetch("/health/goals", {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -555,19 +633,17 @@ export async function saveHealthGoal(accessToken: string, payload: {
 }
 
 export async function updateHealthGoalStatus(accessToken: string, goalId: string, statusValue: string): Promise<void> {
-  const res = await fetch(`${API_BASE}/health/goals/${goalId}/status`, {
+  const res = await apiFetch(`/health/goals/${goalId}/status?status_value=${encodeURIComponent(statusValue)}`, {
     method: "PUT",
     headers: {
-      "Content-Type": "application/json",
       Authorization: `Bearer ${accessToken}`,
     },
-    body: JSON.stringify({ status: statusValue }),
   });
   await parseJson<Record<string, string>>(res);
 }
 
 export async function getDietPlans(accessToken: string): Promise<DietPlan[]> {
-  const res = await fetch(`${API_BASE}/health/diet-plans`, {
+  const res = await apiFetch("/health/diet-plans", {
     headers: { Authorization: `Bearer ${accessToken}` },
   });
   return parseJson<DietPlan[]>(res);
@@ -585,7 +661,7 @@ export async function saveDietPlan(accessToken: string, payload: {
   start_date?: string;
   end_date?: string;
 }): Promise<DietPlan> {
-  const res = await fetch(`${API_BASE}/health/diet-plans`, {
+  const res = await apiFetch("/health/diet-plans", {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
